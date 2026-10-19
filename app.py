@@ -275,7 +275,6 @@ if uploaded_file is None:
         선택 열:
         - 제목
         - 시작 일자/시간
-        - 생산팀 (있으면 생산팀별 제품 구분에 활용됩니다)
         """
     )
     st.stop()
@@ -325,17 +324,6 @@ date_col = find_column(
     ]
 )
 
-# ▼▼▼ [추가] 생산팀 열 찾기 ▼▼▼
-team_col = find_column(
-    df.columns,
-    [
-        "생산팀", "생산 팀", "생산팀명", "담당생산팀",
-        "담당팀", "부서", "생산공장", "공장",
-        "생산라인", "생산부서"
-    ]
-)
-# ▲▲▲ [추가] 끝 ▲▲▲
-
 
 # =========================================================
 # 필수 열 확인
@@ -359,12 +347,6 @@ if content_col is None:
 df[product_col] = df[product_col].fillna("").astype(str).str.strip()
 df[content_col] = df[content_col].fillna("").astype(str)
 
-# ▼▼▼ [추가] 생산팀 열 정리 ▼▼▼
-if team_col is not None:
-    df[team_col] = df[team_col].fillna("미분류").astype(str).str.strip()
-    df.loc[df[team_col] == "", team_col] = "미분류"
-# ▲▲▲ [추가] 끝 ▲▲▲
-
 df = df[df[product_col] != ""].copy()
 
 if df.empty:
@@ -372,64 +354,18 @@ if df.empty:
     st.stop()
 
 
-# ▼▼▼ [추가] 제품 ↔ 생산팀 매핑 생성 ▼▼▼
-# 한 제품이 여러 생산팀 레코드에 걸쳐 있을 수 있으므로,
-# 제품별로 등장한 생산팀을 모두 모아 "/"로 묶어서 표시용 라벨로 사용합니다.
-product_team_map = {}
-
-if team_col is not None:
-    grouped_teams = (
-        df.groupby(product_col)[team_col]
-        .apply(lambda series: sorted(set(series)))
-    )
-
-    for product, teams in grouped_teams.items():
-        product_team_map[product] = "/".join(teams) if teams else "미분류"
-# ▲▲▲ [추가] 끝 ▲▲▲
-
-
 # =========================================================
-# 사이드바 제품 검색 (생산팀별 구분 적용)
+# 사이드바 제품 검색
 # =========================================================
 
 with st.sidebar:
 
     st.header("🔎 제품 검색")
+    st.caption("제품명의 일부만 입력해도 검색됩니다.")
 
     all_products = sorted(
         df[product_col].dropna().astype(str).unique().tolist()
     )
-
-    # ▼▼▼ [추가] 생산팀 필터 ▼▼▼
-    selected_teams = None
-
-    if team_col is not None:
-        all_teams = sorted(df[team_col].dropna().astype(str).unique().tolist())
-
-        selected_teams = st.multiselect(
-            "생산팀 필터",
-            options=all_teams,
-            default=[],
-            placeholder="전체 생산팀 (선택 안 하면 전체 조회)"
-        )
-
-        if selected_teams:
-            team_filtered_products = sorted(
-                df.loc[df[team_col].isin(selected_teams), product_col]
-                .dropna().astype(str).unique().tolist()
-            )
-        else:
-            team_filtered_products = all_products
-
-        st.caption(
-            f"생산팀 필터 적용 대상 제품: {len(team_filtered_products):,}개"
-        )
-    else:
-        team_filtered_products = all_products
-        st.caption("생산팀 열이 없어 전체 제품을 대상으로 검색합니다.")
-    # ▲▲▲ [추가] 끝 ▲▲▲
-
-    st.caption("제품명의 일부만 입력해도 검색됩니다.")
 
     product_search = st.text_input("제품명 검색", placeholder="예: 아일")
     search_keyword = product_search.strip()
@@ -437,44 +373,17 @@ with st.sidebar:
     if search_keyword:
 
         searched_products = [
-            product for product in team_filtered_products
+            product for product in all_products
             if search_keyword.casefold() in product.casefold()
         ]
 
         if searched_products:
-
-            # ▼▼▼ [추가] 생산팀별로 정렬 + [생산팀] 제품명 라벨 구성 ▼▼▼
-            if team_col is not None:
-                searched_products = sorted(
-                    searched_products,
-                    key=lambda product: (
-                        product_team_map.get(product, "미분류"),
-                        product
-                    )
-                )
-
-                label_to_product = {
-                    f"[{product_team_map.get(product, '미분류')}] {product}": product
-                    for product in searched_products
-                }
-
-                selected_label = st.selectbox(
-                    "제품을 선택하세요 (생산팀별 구분)",
-                    list(label_to_product.keys()),
-                    index=0,
-                    label_visibility="collapsed"
-                )
-
-                selected_product = label_to_product[selected_label]
-            else:
-                selected_product = st.selectbox(
-                    "제품을 선택하세요",
-                    searched_products,
-                    index=0,
-                    label_visibility="collapsed"
-                )
-            # ▲▲▲ [추가] 끝 ▲▲▲
-
+            selected_product = st.selectbox(
+                "제품을 선택하세요",
+                searched_products,
+                index=0,
+                label_visibility="collapsed"
+            )
         else:
             st.warning("검색 결과가 없습니다.")
             selected_product = None
@@ -527,12 +436,7 @@ if custom_stopwords_text.strip():
 
 st.subheader(f"선택 제품: {selected_product}")
 
-# ▼▼▼ [추가] 생산팀 열 존재 여부에 따라 메트릭 컬럼 수 조정 ▼▼▼
-if team_col is not None:
-    metric1, metric2, metric3, metric4 = st.columns(4)
-else:
-    metric1, metric2, metric3 = st.columns(3)
-# ▲▲▲ [추가] 끝 ▲▲▲
+metric1, metric2, metric3 = st.columns(3)
 
 with metric1:
     st.metric("선택 제품 상담 건수", f"{len(filtered_df):,}건")
@@ -542,12 +446,6 @@ with metric2:
 
 with metric3:
     st.metric("전체 제품 종류", f"{df[product_col].nunique():,}개")
-
-# ▼▼▼ [추가] 선택 제품의 생산팀 표시 ▼▼▼
-if team_col is not None:
-    with metric4:
-        st.metric("소속 생산팀", product_team_map.get(selected_product, "미분류"))
-# ▲▲▲ [추가] 끝 ▲▲▲
 
 
 if filtered_df.empty:
@@ -650,11 +548,6 @@ if date_col is not None:
 if title_col is not None:
     display_columns.append(title_col)
 
-# ▼▼▼ [추가] 생산팀 열도 원문 테이블에 함께 표시 ▼▼▼
-if team_col is not None:
-    display_columns.append(team_col)
-# ▲▲▲ [추가] 끝 ▲▲▲
-
 display_columns.append(product_col)
 display_columns.append(content_col)
 
@@ -687,16 +580,23 @@ st.dataframe(
 
 
 # =========================================================
-# 다운로드
+# 다운로드 (CSV → XLSX로 변경)
 # =========================================================
 
 st.subheader("분석 결과 다운로드")
 
-csv_data = count_df.to_csv(index=False, encoding="utf-8-sig")
+# ▼▼▼ [수정] CSV 대신 XLSX 파일로 생성 ▼▼▼
+excel_buffer = io.BytesIO()
+
+with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+    count_df.to_excel(writer, index=False, sheet_name="키워드_빈도")
+
+excel_buffer.seek(0)
 
 st.download_button(
-    label="키워드 빈도 CSV 다운로드",
-    data=csv_data,
-    file_name="키워드_빈도.csv",
-    mime="text/csv"
+    label="키워드 빈도 엑셀 다운로드",
+    data=excel_buffer,
+    file_name="키워드_빈도.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+# ▲▲▲ [수정] 끝 ▲▲▲
